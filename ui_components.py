@@ -1,7 +1,7 @@
 import os, threading, re, syncedlyrics, gc
 import vlc
 import customtkinter as ctk
-from tkinter import font as tkfont
+from tkinter import Tk, font as tkfont
 
 class FloatingCinema(ctk.CTkToplevel):
     def __init__(self, master, player, song_path):
@@ -82,29 +82,30 @@ class FloatingCinema(ctk.CTkToplevel):
         except: self.synced_lyrics = [(0, "Lirik tidak tersedia")]
 
     def sync_loop(self):
-        if self.winfo_exists():
+        # 1. Cek apakah jendela masih hidup di awal loop
+        if not self.winfo_exists():
+            return
+
+        try:
             t = self.player.get_time() + (self.lyric_offset * 1000)
             
-            # Cari index lirik sekarang
-            curr_idx = -1
-            for i, (ms, text) in enumerate(self.synced_lyrics):
-                if t >= ms: curr_idx = i
-                else: break
-
-            if curr_idx != -1:
-                # Logika Karaoke: Ambil baris SEBELUM, SEKARANG, dan SESUDAH
-                prev_text = self.synced_lyrics[curr_idx-1][1] if curr_idx > 0 else ""
-                curr_text = self.synced_lyrics[curr_idx][1]
-                next_text = self.synced_lyrics[curr_idx+1][1] if curr_idx < len(self.synced_lyrics)-1 else ""
+            # Cari lirik yang sesuai
+            curr = ""
+            for ms, text in reversed(self.synced_lyrics):
+                if t >= ms:
+                    curr = text
+                    break
+            
+            # 2. Cek lagi sebelum melakukan konfigurasi UI
+            if self.winfo_exists() and self.lbl_lyr.cget("text") != curr:
+                self.lbl_lyr.configure(text=curr)
                 
-                # Gabungkan dengan pemisah newline dan marker khusus buat yang lagi jalan
-                display_text = f"{prev_text}\n▶ {curr_text} ◀\n{next_text}"
-                
-                if self.lbl_lyr.cget("text") != display_text:
-                    self.lbl_lyr.configure(text=display_text)
-                    self.adjust_font_size()
-                    
-            self.after(150, self.sync_loop)
+            # 3. Jadwalkan loop berikutnya hanya jika masih ada
+            if self.winfo_exists():
+                self.after(150, self.sync_loop)
+        except (Tk.TclError, RuntimeError):
+            # Tangkap error jika tiba-click hancur di tengah proses
+            pass
 
     def start_drag(self, e): self._drag_data.update({"x": e.x, "y": e.y})
     def drag(self, e):

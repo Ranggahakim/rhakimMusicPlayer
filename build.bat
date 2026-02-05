@@ -14,7 +14,8 @@ if exist build rd /s /q build
 
 echo [2/3] Memulai proses PyInstaller...
 :: Cari baris PyInstaller di build.bat kamu, pastikan ada --add-data untuk downloader.py
-py -m PyInstaller --noconsole --onefile --name "rhakim Music Player" --icon=app.ico --add-data "ui_components.py;." --add-data "downloader.py;." --add-data "app.ico;." main.py
+:: Tambahkan --add-data "queue_manager.py;."
+py -m PyInstaller --noconsole --onefile --name "rhakim Music Player" --icon=app.ico --add-data "ui_components.py;." --add-data "downloader.py;." --add-data "queue_manager.py;." --add-data "app.ico;." main.py
 
 echo [3/3] Sinkronisasi file pendukung...
 :: Hanya copy .env jika ada, tanpa menghapus settings.json yang sudah ada di dist
