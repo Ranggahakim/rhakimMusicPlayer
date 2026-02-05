@@ -15,14 +15,16 @@ from ui_components import FloatingCinema
 import ctypes
 import sys
 
+# --- LIBRARY BARU ---
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
 def resource_path(relative_path):
     """ Dapatkan path absolut ke resource, berfungsi untuk dev dan PyInstaller """
     try:
-        # PyInstaller membuat folder sementara _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-
     return os.path.join(base_path, relative_path)
 
 # Load environment variables
@@ -32,27 +34,38 @@ vlc_path = r'C:\Program Files\VideoLAN\VLC'
 if os.path.exists(vlc_path):
     os.add_dll_directory(vlc_path)
 
+# --- HANDLER UNTUK FOLDER WATCHER ---
+class PlaylistHandler(FileSystemEventHandler):
+    def __init__(self, callback):
+        self.callback = callback
+    def on_any_event(self, event):
+        if event.is_directory: return
+        if event.src_path.lower().endswith(('.mp4', '.mp3', '.m4a')):
+            self.callback()
+
 class MusicController(ctk.CTk):
     SETTINGS_FILE = "settings.json"
 
     def __init__(self):
         super().__init__()
-        myappid = 'mycompany.myproduct.subproduct.version' # ID bebas
+        myappid = 'rhakim.musicplayer.v2' # ID unik agar icon taskbar muncul
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
         self.title("rhakim Music Player")
-        self.geometry("450x800")
+        self.geometry("450x850") # Sedikit lebih tinggi untuk EQ menu
 
         icon_path = resource_path("app.ico")
         if os.path.exists(icon_path):
             self.iconbitmap(icon_path)
         
-        # --- LOGIKA SYSTEM TRAY & CLOSE ---
         self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         self.tray_icon = None
         
+        # --- INIT VLC & EQUALIZER ---
         self.instance = vlc.Instance("--no-xlib")
         self.player = self.instance.media_player_new()
+        self.equalizer = vlc.AudioEqualizer()
+        self.player.set_equalizer(self.equalizer)
         
         self.all_songs = []
         self.playlist = []
@@ -60,6 +73,7 @@ class MusicController(ctk.CTk):
         self.cinema_window = None
         self.is_shuffle = False
         self.repeat_mode = "none" 
+        self.observer = None # Untuk Watcher
 
         # Discord RPC
         client_id = os.getenv("DISCORD_CLIENT_ID")
@@ -86,6 +100,14 @@ class MusicController(ctk.CTk):
         self.search_var = ctk.StringVar()
         self.search_var.trace_add("write", self.filter_playlist)
         ctk.CTkEntry(self.header, placeholder_text="Cari lagu...", textvariable=self.search_var).pack(side="left", fill="x", expand=True)
+
+        # --- UI EQUALIZER PRESET ---
+        self.eq_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.eq_frame.pack(pady=5, padx=20, fill="x")
+        ctk.CTkLabel(self.eq_frame, text="EQ Preset:").pack(side="left", padx=5)
+        self.eq_menu = ctk.CTkOptionMenu(self.eq_frame, values=["Flat", "Bass Boost", "Rock", "Pop"], 
+                                         command=self.apply_eq_preset, width=120, fg_color="#27ae60")
+        self.eq_menu.pack(side="left", padx=5)
 
         # Playlist
         self.playlist_box = tk.Listbox(self, bg="#1d1e1e", fg="#ffffff", selectbackground="#2ecc71", 
@@ -124,16 +146,34 @@ class MusicController(ctk.CTk):
 
         self.update_ui_loop()
 
-    # --- LOGIKA SYSTEM TRAY (pystray) ---
-    def create_tray_icon(self):
-        # Gunakan ikon aplikasi atau buat gambar sederhana jika belum ada
-        icon_path = resource_path("app.ico")
+    # --- LOGIKA EQUALIZER ---
+    def apply_eq_preset(self, preset):
+        bands = {
+            "Flat": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "Bass Boost": [8, 6, 4, 0, 0, 0, 0, 0, 0, 0],
+            "Rock": [5, 3, -1, -3, -1, 2, 5, 6, 6, 6],
+            "Pop": [-2, -1, 2, 5, 4, -1, -2, -2, -2, -2]
+        }
+        values = bands.get(preset, bands["Flat"])
+        for i, val in enumerate(values):
+            self.equalizer.set_amp_at_index(float(val), i)
+        self.player.set_equalizer(self.equalizer)
+        print(f"EQ Preset Applied: {preset}")
+
+    # --- LOGIKA FOLDER WATCHER ---
+    def start_folder_watcher(self, path):
+        if self.observer:
+            self.observer.stop()
+            self.observer.join()
         
-        if os.path.exists(icon_path):
-            img = Image.open(icon_path)
-        else:
-            img = Image.new('RGB', (64, 64), color=(46, 204, 113)) # Hijau neon default
-            
+        event_handler = PlaylistHandler(callback=lambda: self.after(0, self.process_playlist, path))
+        self.observer = Observer()
+        self.observer.schedule(event_handler, path, recursive=False)
+        self.observer.start()
+
+    def create_tray_icon(self):
+        icon_path = resource_path("app.ico")
+        img = Image.open(icon_path) if os.path.exists(icon_path) else Image.new('RGB', (64, 64), color=(46, 204, 113))
         menu = pystray.Menu(
             item('Show Player', self.show_from_tray, default=True),
             item('Play/Pause', self.toggle_play),
@@ -152,10 +192,12 @@ class MusicController(ctk.CTk):
         if self.cinema_window: self.after(0, self.cinema_window.deiconify)
 
     def quit_app(self):
+        if self.observer:
+            self.observer.stop()
+            self.observer.join()
         if self.tray_icon: self.tray_icon.stop()
         self.quit()
 
-    # --- LOGIKA PLAYER (Sama seperti sebelumnya) ---
     def set_volume(self, val): self.player.audio_set_volume(int(val))
     
     def toggle_shuffle(self):
@@ -235,7 +277,10 @@ class MusicController(ctk.CTk):
 
     def open_folder_dialog(self):
         f = filedialog.askdirectory()
-        if f: self.save_settings(f); self.process_playlist(f)
+        if f: 
+            self.save_settings(f)
+            self.process_playlist(f)
+            self.start_folder_watcher(f)
 
     def process_playlist(self, path):
         self.all_songs = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(('.mp4', '.mp3', '.m4a'))]
@@ -245,7 +290,9 @@ class MusicController(ctk.CTk):
         if os.path.exists(self.SETTINGS_FILE):
             with open(self.SETTINGS_FILE, "r") as f:
                 path = json.load(f).get("last_folder")
-                if path and os.path.exists(path): self.process_playlist(path)
+                if path and os.path.exists(path): 
+                    self.process_playlist(path)
+                    self.start_folder_watcher(path)
 
     def save_settings(self, path):
         with open(self.SETTINGS_FILE, "w") as f: json.dump({"last_folder": path}, f)
