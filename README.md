@@ -1,70 +1,63 @@
 # 🎶 rhakim Music Player
 
-**rhakim Music Player** adalah aplikasi pemutar video musik (MV) premium berbasis Python. Didesain untuk para kolektor MV yang menginginkan pengalaman menonton sambil beraktivitas, lengkap dengan fitur jendela melayang yang canggih, sinkronisasi lirik, dan integrasi sosial.
+A professional-grade, feature-rich music and MV player built with Python. Designed specifically for power users and developers who want a seamless, high-quality media experience while working.
 
-## 🚀 Fitur Utama (v2.0)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)
+![VLC](https://img.shields.io/badge/VLC-Engine-orange?style=for-the-badge&logo=vlc-mediaplayer)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-* **📺 Floating Cinema**: Jendela video melayang yang *always-on-top*, bisa di-*resize*, dan mendukung mode sembunyi (withdraw).
-* **🎤 Pro Lyric Engine**:
-* **Dual Mode**: Mendukung lirik lokal (`.lrc`) dan pencarian otomatis via internet.
-* **Manual Offset**: Kalibrasi waktu lirik (± 0.5 detik) secara langsung jika lirik tidak sinkron.
-* **Auto-scaling**: Font lirik otomatis mengecil atau membesar mengikuti ukuran jendela.
+## ✨ Key Features
 
-
-* **🕹️ Advanced Playback**:
-* **Volume Control**: *Slider* volume mandiri yang tidak mengganggu volume sistem Windows.
-* **Shuffle & Repeat**: Mode putar acak dan pengulangan lagu (One/All).
-
-
-* **👾 Discord Rich Presence**: Menampilkan judul lagu yang sedang kamu dengarkan secara *real-time* di profil Discord kamu.
-* **🛡️ Security Minded**: Menggunakan sistem `.env` untuk mengamankan Discord Client ID kamu agar tidak bocor di publik.
-
-## 📦 Persiapan & Instalasi
-
-1. **Instal VLC Media Player**: Aplikasi ini membutuhkan VLC 64-bit terinstal di sistem kamu.
-2. **Clone Repo**:
-```bash
-git clone https://github.com/Ranggahakim/rhakimMusicPlayer.git
-cd rhakimMusicPlayer
-
-```
-
-
-3. **Instal Library**:
-```bash
-pip install customtkinter python-vlc syncedlyrics pypresence python-dotenv
-
-```
-
-
-4. **Konfigurasi Keamanan**: Buat file `.env` di folder utama dan masukkan ID Discord kamu:
-```text
-DISCORD_CLIENT_ID=GANTI_DENGAN_ID_KAMU
-
-```
+- **📺 Floating Cinema Mode**: A borderless, always-on-top video window optimized for Music Videos.
+- **🎤 Karaoke-Style Lyrics**: Real-time synced lyrics with a 3-line display (Previous, Current, Next). Includes manual offset adjustment (+/-) for perfect timing.
+- **📥 Built-in MV Downloader**: Integrated YouTube downloader using `yt-dlp`. Optimized for 360p/480p to save disk space and RAM.
+- **🎛 Audio Equalizer**: 10-band hardware equalizer with custom presets (Bass Boost, Rock, Pop, and Flat).
+- **🔄 Smart Folder Watcher**: Real-time file system monitoring. Playlist updates automatically when new media is added to the folder.
+- **🎮 Discord Rich Presence**: Share your current vibe on Discord with integrated RPC.
+- **📥 System Tray Integration**: Minimizes to the system tray with a functional context menu to keep your taskbar clean.
 
 
 
-## 🛠️ Cara Build Menjadi Aplikasi (.exe)
+## 🚀 Installation
 
-Gunakan perintah berikut untuk membungkus kode menjadi file executable mandiri dengan nama resmi dan ikon kustom:
+1. **Prerequisites**:
+   - Install [VLC Media Player](https://www.videolan.org/vlc/) (64-bit version is required).
+   - Python 3.10 or higher.
 
-```powershell
-python -m PyInstaller --noconsole --onefile --name "rhakim Music Player" --icon=app.ico --add-data "ui_components.py;." main.py
+2. **Clone Repository**:
+   ```bash
+   git clone [https://github.com/yourusername/rhakimMusicPlayer.git](https://github.com/yourusername/rhakimMusicPlayer.git)
+   cd rhakimMusicPlayer
 
-```
+3. **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
 
-## 📂 Struktur Proyek
 
-* `main.py`: Otak utama aplikasi, manajemen playlist, dan Discord RPC.
-* `ui_components.py`: Komponen GUI untuk jendela lirik melayang.
-* `app.ico`: Ikon aplikasi 🎶🔊.
-* `.env`: Penyimpanan rahasia Client ID (Jangan di-push ke GitHub!).
+4. **Environment Setup**:
+Create a `.env` file in the root directory:
+    ```env
+    DISCORD_CLIENT_ID=your_discord_app_id_here
+
+## ⌨️ Control Guide
+
+| Action | Control / UI Element |
+| --- | --- |
+| **Open Folder** | 📁 Button |
+| **Toggle Cinema** | 📺 Button |
+| **Download MV** | 📥 Button |
+| **Adjust Lyrics Offset** | `+` / `-` in Cinema Drag Bar |
+| **Search Playlist** | Search Entry (Top) |
+| **Tray Menu** | Right-Click Tray Icon |
+
+## 🛠 Tech Stack
+
+* **GUI Framework**: CustomTkinter (Modern Dark UI)
+* **Multimedia Engine**: LibVLC via `python-vlc`
+* **Lyrics Engine**: `syncedlyrics` (LRC format)
+* **Downloader**: `yt-dlp` (YouTube Engine)
+* **File Monitoring**: `watchdog` (Event-driven)
 
 ---
 
-### Tips Pro: Auto-Sync Lirik
-
-Pastikan nama file lagu dan file lirik kamu sama persis (misal: `MvLagu.mp4` dan `MvLagu.lrc`) agar aplikasi bisa langsung memutar lirik secara *offline* tanpa perlu internet.
-
----
+Developed with ❤️ by **[rhakim](https://github.com/yourusername)**
