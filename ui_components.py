@@ -84,10 +84,26 @@ class FloatingCinema(ctk.CTkToplevel):
             base_path = os.path.splitext(full_path)[0]
             local_lrc_path = base_path + ".lrc"
             raw_lrc = ""
+            
+            # 1. Cek lirik lokal dulu
             if os.path.exists(local_lrc_path):
-                with open(local_lrc_path, 'r', encoding='utf-8') as f: raw_lrc = f.read()
+                with open(local_lrc_path, 'r', encoding='utf-8') as f: 
+                    raw_lrc = f.read()
             else:
-                raw_lrc = syncedlyrics.search(os.path.basename(base_path))
+                # 2. Jika tidak ada, baru cari online
+                clean_title = os.path.basename(base_path)
+                raw_lrc = syncedlyrics.search(clean_title)
+                
+                # --- FITUR BARU: AUTO-SAVE ---
+                if raw_lrc:
+                    try:
+                        with open(local_lrc_path, 'w', encoding='utf-8') as f:
+                            f.write(raw_lrc)
+                        print(f"Lirik otomatis tersimpan: {os.path.basename(local_lrc_path)}")
+                    except Exception as save_error:
+                        print(f"Gagal auto-save lirik: {save_error}")
+            
+            # 3. Parsing lirik ke list synced_lyrics (tetap sama)
             if raw_lrc:
                 lines = []
                 for line in raw_lrc.splitlines():
@@ -98,8 +114,8 @@ class FloatingCinema(ctk.CTkToplevel):
                 self.synced_lyrics = sorted(lines)
             else:
                 self.synced_lyrics = [(0, "Lirik tidak ditemukan")]
-        except:
-            self.synced_lyrics = [(0, "Gagal memuat lirik")]
+        except Exception as e:
+            self.synced_lyrics = [(0, f"Gagal memuat lirik: {str(e)}")]
 
     def sync_loop(self):
         if self.winfo_exists():
