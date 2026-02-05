@@ -1,0 +1,16 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build
+build/
+dist/
+*.spec
+
+# User Settings / Local Config
+settings.json
+
+# OS specific files
+.DS_Store
+Thumbs.db
