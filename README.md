@@ -60,4 +60,4 @@ Create a `.env` file in the root directory:
 
 ---
 
-Developed with ❤️ by **[rhakim](https://github.com/yourusername)**
+Developed with ❤️ by **[rhakim](https://github.com/Ranggahakim)**
