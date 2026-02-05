@@ -1,18 +1,22 @@
 import os
-from dotenv import load_dotenv
-import time
 import vlc
 import json
 import random
+import threading
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import filedialog
-from ui_components import FloatingCinema
+from PIL import Image
+import pystray
+from pystray import MenuItem as item
+from pynput import keyboard
+from dotenv import load_dotenv
 from pypresence import Presence
+from ui_components import FloatingCinema
 
+# Load environment variables
 load_dotenv()
 
-# --- SETUP VLC ---
 vlc_path = r'C:\Program Files\VideoLAN\VLC' 
 if os.path.exists(vlc_path):
     os.add_dll_directory(vlc_path)
@@ -22,9 +26,13 @@ class MusicController(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        self.title("rhakim Music Controller")
+        self.title("rhakim Music Player")
         self.geometry("450x800")
-
+        
+        # --- LOGIKA SYSTEM TRAY & CLOSE ---
+        self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        self.tray_icon = None
+        
         self.instance = vlc.Instance("--no-xlib")
         self.player = self.instance.media_player_new()
         
@@ -33,41 +41,44 @@ class MusicController(ctk.CTk):
         self.current_idx = 0
         self.cinema_window = None
         self.is_shuffle = False
-        self.repeat_mode = "none" # "none", "one", "all"
+        self.repeat_mode = "none" 
 
+        # Discord RPC
         client_id = os.getenv("DISCORD_CLIENT_ID")
-        # Discord RPC (Ganti CLIENT_ID dengan milikmu nanti)
-        print(client_id)
         try:
-            self.rpc = Presence(client_id) # Contoh ID
-            self.rpc.connect()
-            print("Mantap! Discord RPC Berhasil Konek.")
-        except:
-            self.rpc = None
-            print("DISCORD ENGGA KONEK!")
+            if client_id:
+                self.rpc = Presence(client_id)
+                self.rpc.connect()
+            else: self.rpc = None
+        except: self.rpc = None
 
         self.setup_ui()
         self.load_recent_folder()
+        
+        # --- START GLOBAL HOTKEYS ---
+        self.setup_hotkeys()
+        
+        # --- START SYSTEM TRAY ---
+        threading.Thread(target=self.create_tray_icon, daemon=True).start()
 
     def setup_ui(self):
-        # Header: Folder & Show Video
+        # Header & Search
         self.header = ctk.CTkFrame(self, fg_color="transparent")
         self.header.pack(pady=10, padx=20, fill="x")
         ctk.CTkButton(self.header, text="📁", width=40, command=self.open_folder_dialog).pack(side="left", padx=5)
         ctk.CTkButton(self.header, text="📺", width=40, fg_color="#2ecc71", command=self.ensure_window).pack(side="left", padx=5)
         
-        # Search Bar
         self.search_var = ctk.StringVar()
         self.search_var.trace_add("write", self.filter_playlist)
         ctk.CTkEntry(self.header, placeholder_text="Cari lagu...", textvariable=self.search_var).pack(side="left", fill="x", expand=True)
 
-        # Playlist Listbox
+        # Playlist
         self.playlist_box = tk.Listbox(self, bg="#1d1e1e", fg="#ffffff", selectbackground="#2ecc71", 
                                       selectforeground="#000000", font=("Arial", 11), borderwidth=0)
         self.playlist_box.pack(pady=5, padx=20, fill="both", expand=True)
         self.playlist_box.bind("<Double-Button-1>", self.on_playlist_double_click)
 
-        # Volume & Modes Frame
+        # Volume & Modes
         self.ctrl_panel = ctk.CTkFrame(self, fg_color="transparent")
         self.ctrl_panel.pack(pady=5, padx=20, fill="x")
         
@@ -81,14 +92,14 @@ class MusicController(ctk.CTk):
         self.btn_repeat = ctk.CTkButton(self.ctrl_panel, text="🔁 OFF", width=60, command=self.toggle_repeat)
         self.btn_repeat.pack(side="left", padx=5)
 
-        # Progress & Time
+        # Progress
         self.lbl_time = ctk.CTkLabel(self, text="00:00 / 00:00")
         self.lbl_time.pack()
         self.slider_progress = ctk.CTkSlider(self, from_=0, to=1000, command=self.seek_song)
         self.slider_progress.set(0)
         self.slider_progress.pack(pady=10, padx=30, fill="x")
 
-        # Playback Nav
+        # Nav
         self.nav = ctk.CTkFrame(self, fg_color="transparent")
         self.nav.pack(pady=10)
         ctk.CTkButton(self.nav, text="⏮", width=60, command=self.prev_song).grid(row=0, column=0, padx=10)
@@ -98,9 +109,57 @@ class MusicController(ctk.CTk):
 
         self.update_ui_loop()
 
-    def set_volume(self, val):
-        self.player.audio_set_volume(int(val))
+    # --- LOGIKA GLOBAL HOTKEYS (pynput) ---
+    def setup_hotkeys(self):
+        def on_press(key):
+            try:
+                # Kombinasi Alt + Arrow/P
+                if any([key == keyboard.Key.media_play_pause, 
+                        (hasattr(key, 'char') and key.char == 'p')]):
+                    self.toggle_play()
+                elif key == keyboard.Key.media_next:
+                    self.next_song()
+                elif key == keyboard.Key.media_previous:
+                    self.prev_song()
+            except: pass
 
+        # Menjalankan listener di thread terpisah agar tidak mematikan GUI
+        self.listener = keyboard.Listener(on_press=on_press)
+        self.listener.start()
+
+    # --- LOGIKA SYSTEM TRAY (pystray) ---
+    def create_tray_icon(self):
+        # Gunakan ikon aplikasi atau buat gambar sederhana jika belum ada
+        icon_path = "app.ico"
+        if os.path.exists(icon_path):
+            img = Image.open(icon_path)
+        else:
+            img = Image.new('RGB', (64, 64), color=(46, 204, 113)) # Hijau neon default
+            
+        menu = pystray.Menu(
+            item('Show Player', self.show_from_tray, default=True),
+            item('Play/Pause', self.toggle_play),
+            item('Next', self.next_song),
+            item('Exit', self.quit_app)
+        )
+        self.tray_icon = pystray.Icon("rhakimMusicPlayer", img, "rhakim Music Player", menu)
+        self.tray_icon.run()
+
+    def hide_to_tray(self):
+        self.withdraw()
+        if self.cinema_window: self.cinema_window.withdraw()
+
+    def show_from_tray(self):
+        self.after(0, self.deiconify)
+        if self.cinema_window: self.after(0, self.cinema_window.deiconify)
+
+    def quit_app(self):
+        if self.tray_icon: self.tray_icon.stop()
+        self.quit()
+
+    # --- LOGIKA PLAYER (Sama seperti sebelumnya) ---
+    def set_volume(self, val): self.player.audio_set_volume(int(val))
+    
     def toggle_shuffle(self):
         self.is_shuffle = not self.is_shuffle
         self.btn_shuffle.configure(text=f"🔀 {'ON' if self.is_shuffle else 'OFF'}", fg_color="#2ecc71" if self.is_shuffle else "#3b3b3b")
@@ -119,29 +178,19 @@ class MusicController(ctk.CTk):
             self.player.set_hwnd(self.cinema_window.video_frame.winfo_id())
         else:
             self.cinema_window.deiconify()
-            self.cinema_window.focus()
 
     def play_current(self):
         if not self.playlist: return
         self.ensure_window()
         path = self.playlist[self.current_idx]
-        song_name = os.path.basename(path)
         media = self.instance.media_new(path)
         self.player.set_media(media)
-        if self.cinema_window and self.cinema_window.winfo_exists():
-            self.cinema_window.update_song(path)
+        if self.cinema_window: self.cinema_window.update_song(path)
         self.player.play()
         self.btn_play.configure(text="⏸ PAUSE")
         self.update_listbox()
         if self.rpc: 
-            try: 
-                self.rpc.update(
-                    details=f"🎵 {song_name}", # Baris pertama: Judul Lagu
-                    state="Enjoying the MV",     # Baris kedua: Status tambahan
-                    large_image="logo",          # Nama file icon yang kamu upload di Discord Dev Portal
-                    large_text="rhakim Music Player",
-                    start=time.time()            # Menampilkan durasi 'elapsed' (sudah berapa lama diputar)
-                )
+            try: self.rpc.update(details=f"🎵 {os.path.basename(path)}", state="Enjoying the MV", large_image="logo")
             except: pass
 
     def toggle_play(self):
@@ -172,9 +221,6 @@ class MusicController(ctk.CTk):
     def update_listbox(self):
         self.playlist_box.delete(0, tk.END)
         for f in self.playlist: self.playlist_box.insert(tk.END, f"  {os.path.basename(f)}")
-        if 0 <= self.current_idx < len(self.playlist):
-            self.playlist_box.selection_clear(0, tk.END)
-            self.playlist_box.selection_set(self.current_idx)
 
     def on_playlist_double_click(self, event):
         sel = self.playlist_box.curselection()
@@ -184,9 +230,6 @@ class MusicController(ctk.CTk):
         if self.player.is_playing():
             pos = self.player.get_position() * 1000
             if pos >= 0: self.slider_progress.set(pos)
-            curr = self.player.get_time() // 1000
-            total = self.player.get_length() // 1000
-            if total > 0: self.lbl_time.configure(text=f"{curr//60:02d}:{curr%60:02d} / {total//60:02d}:{total%60:02d}")
         if self.player.get_state() == vlc.State.Ended:
             if self.repeat_mode == "one": self.play_current()
             else: self.next_song()
