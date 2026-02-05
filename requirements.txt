@@ -1,4 +1,3 @@
-```text
 customtkinter
 python-vlc
 Pillow
