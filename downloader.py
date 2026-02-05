@@ -1,6 +1,13 @@
-import os, threading, gc, yt_dlp
+import os, threading, gc, yt_dlp, sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class DownloadWindow(ctk.CTkToplevel):
     def __init__(self, parent, refresh_callback):
@@ -9,6 +16,11 @@ class DownloadWindow(ctk.CTkToplevel):
         self.geometry("500x320")
         self.refresh_callback = refresh_callback
         self.attributes('-topmost', True)
+
+        icon_path = resource_path("app.ico")
+        if os.path.exists(icon_path):
+            self.after(200, lambda: self.iconbitmap(icon_path))
+    
         self.setup_ui()
 
     def setup_ui(self):

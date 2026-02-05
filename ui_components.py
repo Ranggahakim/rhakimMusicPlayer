@@ -1,14 +1,26 @@
-import os, threading, re, syncedlyrics, gc
+import os, threading, re, syncedlyrics, gc, sys
+import tkinter
 import vlc
 import customtkinter as ctk
 from tkinter import Tk, font as tkfont
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class FloatingCinema(ctk.CTkToplevel):
     def __init__(self, master, player, song_path):
         super().__init__(master)
         self.overrideredirect(True)
-        self.geometry("500x450") # Sedikit lebih tinggi biar 3 baris lega
+        self.geometry("500x450")
         self.attributes("-topmost", True)
+
+        icon_path = resource_path("app.ico")
+        if os.path.exists(icon_path):
+            self.after(200, lambda: self.iconbitmap(icon_path))
         
         self.player, self._drag_data = player, {"x": 0, "y": 0}
         self.synced_lyrics, self.lyric_offset = [], 0.0
@@ -82,29 +94,33 @@ class FloatingCinema(ctk.CTkToplevel):
         except: self.synced_lyrics = [(0, "Lirik tidak tersedia")]
 
     def sync_loop(self):
-        # 1. Cek apakah jendela masih hidup di awal loop
         if not self.winfo_exists():
             return
 
         try:
             t = self.player.get_time() + (self.lyric_offset * 1000)
             
-            # Cari lirik yang sesuai
-            curr = ""
-            for ms, text in reversed(self.synced_lyrics):
-                if t >= ms:
-                    curr = text
+            curr_idx = -1
+            for i, (ms, text) in enumerate(self.synced_lyrics):
+                if t >= ms: 
+                    curr_idx = i
+                else: 
                     break
-            
-            # 2. Cek lagi sebelum melakukan konfigurasi UI
-            if self.winfo_exists() and self.lbl_lyr.cget("text") != curr:
-                self.lbl_lyr.configure(text=curr)
+
+            if curr_idx != -1:
+                prev_text = self.synced_lyrics[curr_idx-1][1] if curr_idx > 0 else ""
+                curr_text = self.synced_lyrics[curr_idx][1]
+                next_text = self.synced_lyrics[curr_idx+1][1] if curr_idx < len(self.synced_lyrics)-1 else ""
                 
-            # 3. Jadwalkan loop berikutnya hanya jika masih ada
+                display_text = f"{prev_text}\n▶ {curr_text} ◀\n{next_text}"
+                
+                if self.winfo_exists() and self.lbl_lyr.cget("text") != display_text:
+                    self.lbl_lyr.configure(text=display_text)
+                    
             if self.winfo_exists():
                 self.after(150, self.sync_loop)
-        except (Tk.TclError, RuntimeError):
-            # Tangkap error jika tiba-click hancur di tengah proses
+                
+        except (tkinter.TclError, RuntimeError):
             pass
 
     def start_drag(self, e): self._drag_data.update({"x": e.x, "y": e.y})
@@ -116,7 +132,6 @@ class FloatingCinema(ctk.CTkToplevel):
         self.geometry(f"{max(200, e.x_root - self.winfo_x())}x{max(150, e.y_root - self.winfo_y())}")
 
     def adjust_font_size(self):
-        # Optimasi font biar gak nabrak pas 3 baris muncul
         lines = self.lbl_lyr.cget("text").split('\n')
         longest = max(lines, key=len) if lines else ""
         size = 20

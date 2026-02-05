@@ -2,7 +2,7 @@ import os, sys, json, random, threading, ctypes, gc
 import vlc
 import tkinter as tk
 import customtkinter as ctk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 from PIL import Image
 import pystray
 from pystray import MenuItem as item
@@ -10,16 +10,17 @@ from dotenv import load_dotenv
 from pypresence import Presence
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import ctypes
 
 # Internal Modules
 from ui_components import FloatingCinema
 from queue_manager import QueueWindow
 from downloader import DownloadWindow
+from playlist_manager import PlaylistManager
 
 load_dotenv()
 
 def resource_path(relative_path):
-    """ Dapatkan path absolut untuk dev dan PyInstaller """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -42,24 +43,21 @@ class MusicController(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        # Agar icon muncul benar di taskbar
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('rhakim.musicplayer.v2')
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('rhakim.musicplayer')
 
         self.title("rhakim Music Player")
-        self.geometry("450x880") # Sedikit lebih tinggi untuk kontrol RPC
+        self.geometry("450x880")
         
         icon_path = resource_path("app.ico")
         if os.path.exists(icon_path): self.iconbitmap(icon_path)
         
         self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         
-        # VLC Engine
         self.instance = vlc.Instance("--no-xlib")
         self.player = self.instance.media_player_new()
         self.equalizer = vlc.AudioEqualizer()
         self.player.set_equalizer(self.equalizer)
         
-        # States
         self.all_songs, self.playlist = [], []
         self.current_idx = 0
         self.cinema_window = None
@@ -67,12 +65,10 @@ class MusicController(ctk.CTk):
         self.repeat_mode = "none" 
         self.observer = None
         self.tray_icon = None
+        self.queue = []
 
-        # --- DISCORD RPC STATE ---
         self.rpc_presets = ["Coding", "Chill", "Gaming", "Sad", "Depress", "Energic"]
         self.custom_status_var = ctk.StringVar(value="Chill")
-
-        self.queue = []
 
         self.setup_rpc()
         self.setup_ui()
@@ -80,29 +76,28 @@ class MusicController(ctk.CTk):
         threading.Thread(target=self.create_tray_icon, daemon=True).start()
 
     def setup_rpc(self):
-        # Gunakan Client ID asli kamu di sini sebagai cadangan
         client_id = os.getenv("DISCORD_CLIENT_ID") or "YOUR_HARDCODED_ID_HERE"
         try:
             if client_id:
-                self.rpc = Presence(client_id)
-                self.rpc.connect()
+                self.rpc = Presence(client_id); self.rpc.connect()
             else: self.rpc = None
         except: self.rpc = None
 
     def setup_ui(self):
-        # Header (Folder, Cinema, Download)
+        # Header
         self.header = ctk.CTkFrame(self, fg_color="transparent")
         self.header.pack(pady=10, padx=20, fill="x")
         ctk.CTkButton(self.header, text="📁", width=40, command=self.open_folder_dialog).pack(side="left", padx=5)
         ctk.CTkButton(self.header, text="📺", width=40, fg_color="#2ecc71", command=self.ensure_window).pack(side="left", padx=5)
         ctk.CTkButton(self.header, text="📥", width=40, fg_color="#e74c3c", command=self.open_download_window).pack(side="left", padx=5)
         ctk.CTkButton(self.header, text="🔢", width=40, fg_color="#9b59b6", command=self.open_queue_window).pack(side="left", padx=5)
+        ctk.CTkButton(self.header, text="📜", width=40, fg_color="#f39c12", command=self.open_playlist_manager).pack(side="left", padx=5)
 
         self.search_var = ctk.StringVar()
         self.search_var.trace_add("write", self.filter_playlist)
         ctk.CTkEntry(self.header, placeholder_text="Cari lagu...", textvariable=self.search_var).pack(side="left", fill="x", expand=True)
 
-        # --- AUDIO EQUALIZER ---
+        # EQ UI
         self.eq_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.eq_frame.pack(pady=5, padx=20, fill="x")
         ctk.CTkLabel(self.eq_frame, text="EQ:").pack(side="left", padx=5)
@@ -110,17 +105,14 @@ class MusicController(ctk.CTk):
                                          command=self.apply_eq_preset, width=100, fg_color="#27ae60")
         self.eq_menu.pack(side="left", padx=5)
 
-        # --- DISCORD RPC CONTROLS ---
+        # RPC UI
         self.rpc_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.rpc_frame.pack(pady=5, padx=20, fill="x")
-        
         self.rpc_menu = ctk.CTkOptionMenu(self.rpc_frame, values=self.rpc_presets, 
                                           command=self.change_rpc_mode, width=100, fg_color="#7289da")
         self.rpc_menu.pack(side="left", padx=5)
-        
         self.rpc_entry = ctk.CTkEntry(self.rpc_frame, textvariable=self.custom_status_var, placeholder_text="Custom status...")
         self.rpc_entry.pack(side="left", fill="x", expand=True, padx=5)
-        
         ctk.CTkButton(self.rpc_frame, text="Set", width=40, command=self.update_rpc_status).pack(side="left", padx=2)
 
         # Playlist Box
@@ -128,43 +120,90 @@ class MusicController(ctk.CTk):
                                       selectforeground="#000000", font=("Arial", 11), borderwidth=0)
         self.playlist_box.pack(pady=5, padx=20, fill="both", expand=True)
         self.playlist_box.bind("<Double-Button-1>", self.on_playlist_double_click)
+        self.playlist_box.bind("<Button-3>", self.show_context_menu)
 
         # Mode & Volume
         self.btm_ctrl = ctk.CTkFrame(self, fg_color="transparent")
         self.btm_ctrl.pack(pady=5, padx=20, fill="x")
-        
         self.btn_shuffle = ctk.CTkButton(self.btm_ctrl, text="🔀 OFF", width=70, fg_color="#333", command=self.toggle_shuffle)
         self.btn_shuffle.pack(side="left", padx=5)
         self.btn_repeat = ctk.CTkButton(self.btm_ctrl, text="🔁 OFF", width=70, fg_color="#333", command=self.toggle_repeat)
         self.btn_repeat.pack(side="left", padx=5)
-
         self.slider_vol = ctk.CTkSlider(self.btm_ctrl, from_=0, to=100, width=120, command=self.set_volume)
         self.slider_vol.set(70); self.slider_vol.pack(side="right", padx=5)
 
-        # Progress & Nav
+        # Progress
         self.slider_progress = ctk.CTkSlider(self, from_=0, to=1000, command=self.seek_song)
         self.slider_progress.pack(pady=10, padx=30, fill="x")
 
+        # Navigation
         self.nav = ctk.CTkFrame(self, fg_color="transparent")
         self.nav.pack(pady=10)
         ctk.CTkButton(self.nav, text="⏮", width=60, font=("Arial", 20), command=self.prev_song).grid(row=0, column=0, padx=10)
         self.btn_play = ctk.CTkButton(self.nav, text="▶ PLAY", width=120, font=("Arial", 14, "bold"), command=self.toggle_play)
         self.btn_play.grid(row=0, column=1, padx=10)
-        ctk.CTkButton(self.nav, text="⏭", width=60, font=("Arial", 20), command=self.next_song).grid(row=0, column=2, padx=10)
-
-        # Binding Klik Kanan (Button-3 adalah klik kanan di Windows)
-        self.playlist_box.bind("<Button-3>", self.show_context_menu)
-        
-        # Buat Menu Klik Kanan (Context Menu)
-        self.context_menu = tk.Menu(self, tearoff=0, bg="#2b2b2b", fg="white", borderwidth=0)
-        self.context_menu.add_command(label="➕ Add to Queue", command=self.add_to_queue)
+        ctk.CTkButton(self.nav, text="⏭", width=60, font=("Arial", 20), command=lambda: self.next_song(manual=True)).grid(row=0, column=2, padx=10)
 
         self.update_ui_loop()
 
-    # --- DISCORD RPC LOGIC ---
+    # --- PLAYLIST TREE LOGIC ---
+    def open_playlist_manager(self):
+        if hasattr(self, 'pl_win') and self.pl_win.winfo_exists():
+            self.pl_win.deiconify()
+            self.pl_win.focus()
+        else:
+            self.pl_win = PlaylistManager(self, self.apply_loaded_playlist)
+
+    def apply_loaded_playlist(self, song_paths):
+        valid_songs = [s for s in song_paths if os.path.exists(s)]
+        
+        if valid_songs:
+            for song in valid_songs:
+                self.queue.append(song)
+            
+            if hasattr(self, 'q_win') and self.q_win.winfo_exists():
+                self.q_win.update_list()
+
+            self.next_song()
+
+            print(f"Berhasil menambahkan {len(valid_songs)} lagu ke antrean.")
+            # messagebox.showinfo("Queue Update", f"{len(valid_songs)} lagu dari playlist telah ditambahkan ke antrean!")
+        else:
+            messagebox.showerror("Error", "Lagu-lagu di playlist ini sudah tidak ditemukan.")
+
+    def show_context_menu(self, event):
+        idx = self.playlist_box.nearest(event.y)
+        self.playlist_box.selection_clear(0, tk.END)
+        self.playlist_box.selection_set(idx)
+        
+        self.context_menu = tk.Menu(self, tearoff=0, bg="#2b2b2b", fg="white", borderwidth=0)
+        self.context_menu.add_command(label="➕ Add to Queue", command=self.add_to_queue)
+        
+        # Submenu Dinamis
+        self.playlist_submenu = tk.Menu(self.context_menu, tearoff=0, bg="#2b2b2b", fg="white")
+        folder = "saved_playlists"
+        if os.path.exists(folder):
+            playlists = [f.replace(".json", "") for f in os.listdir(folder) if f.endswith(".json")]
+            for p in playlists:
+                self.playlist_submenu.add_command(label=f"📁 {p}", command=lambda n=p: self.quick_add_to_playlist(n))
+        
+        self.context_menu.add_cascade(label="📜 Add to Playlist", menu=self.playlist_submenu)
+        self.context_menu.post(event.x_root, event.y_root)
+
+    def quick_add_to_playlist(self, name):
+        sel = self.playlist_box.curselection()
+        if sel:
+            path = self.playlist[sel[0]]
+            file_path = os.path.join("saved_playlists", f"{name}.json")
+            with open(file_path, "r") as f: songs = json.load(f)
+            if path not in songs:
+                songs.append(path)
+                with open(file_path, "w") as f: json.dump(songs, f)
+                print(f"Added to {name}!")
+
+    # --- SHARED LOGIC ---
     def change_rpc_mode(self, choice):
-        self.custom_status_var.set(choice)
-        self.update_rpc_status()
+        self.custom_status_var.set(choice); self.update_rpc_status()
 
     def update_rpc_status(self):
         if not self.rpc or not self.winfo_exists(): return
@@ -174,7 +213,6 @@ class MusicController(ctk.CTk):
             self.rpc.update(details=f"🎵 {song}", state=status, large_image="logo", large_text="rhakim Music Player")
         except: pass
 
-    # --- AUDIO LOGIC ---
     def apply_eq_preset(self, p):
         ps = {"Flat": [0]*10, "Bass Boost": [8,6,4,0,0,0,0,0,0,0], "Rock": [5,3,-1,-3,-1,2,5,6,6,6], "Pop": [-2,-1,2,5,4,-1,-2,-2,-2,-2]}
         for i, v in enumerate(ps.get(p, ps["Flat"])): self.equalizer.set_amp_at_index(float(v), i)
@@ -187,8 +225,82 @@ class MusicController(ctk.CTk):
         self.player.set_media(self.instance.media_new(path))
         if self.cinema_window: self.cinema_window.update_song(path)
         self.player.play(); self.btn_play.configure(text="⏸ PAUSE")
+
+        if hasattr(self, 'q_win') and self.q_win.winfo_exists():
+            self.q_win.update_list(path)
+            
         self.update_listbox()
         self.update_rpc_status()
+
+    def next_song(self, manual=True):
+        if not self.playlist: return
+        
+        # 1. Prioritas: Cek Antrean (Queue)
+        # Antrean tetap jalan karena ini adalah aksi eksplisit user buat antre lagu
+        if self.queue:
+            next_path = self.queue.pop(0) 
+            if next_path in self.playlist:
+                self.current_idx = self.playlist.index(next_path)
+            if hasattr(self, 'q_win') and self.q_win.winfo_exists():
+                self.q_win.update_list(next_path)
+            self.play_current()
+            return
+
+        # 2. FIX: Jika mode ONE, pencet NEXT pun tetap ngulang lagu yang sama (sesuai request)
+        if self.repeat_mode == "one":
+            self.play_current()
+            return
+
+        # 3. Logika Shuffle
+        if self.is_shuffle:
+            self.current_idx = random.randint(0, len(self.playlist)-1)
+        else:
+            # 4. Logika Normal / Repeat ALL
+            new_idx = self.current_idx + 1
+            if new_idx < len(self.playlist):
+                self.current_idx = new_idx
+            else:
+                # Jika sudah di ujung playlist
+                if self.repeat_mode == "all" or manual:
+                    self.current_idx = 0 # Balik ke awal
+                else:
+                    # Berhenti jika mode NONE dan ini auto-next
+                    self.player.stop()
+                    self.btn_play.configure(text="▶ PLAY")
+                    self.update_rpc_status()
+                    return
+
+        self.play_current()
+
+    def prev_song(self):
+        if not self.playlist: return
+        
+        # 1. FIX: Jika mode ONE, pencet PREV pun tetap ngulang lagu yang sama
+        if self.repeat_mode == "one":
+            self.play_current()
+            return
+
+        if self.is_shuffle:
+            self.current_idx = random.randint(0, len(self.playlist)-1)
+        else:
+            new_idx = self.current_idx - 1
+            if new_idx >= 0:
+                self.current_idx = new_idx
+            else:
+                # Jika di awal playlist, cek repeat mode
+                if self.repeat_mode != "none":
+                    self.current_idx = len(self.playlist) - 1 # Wrap ke lagu paling akhir
+                else:
+                    self.player.stop()
+                    self.btn_play.configure(text="▶ PLAY")
+                    self.update_rpc_status()
+                    return
+                    
+        self.play_current()
+
+    def toggle_play(self):
+        if self.player.is_playing(): self.player.pause(); self.btn_play.configure(text="▶ PLAY")
+        else: self.ensure_window(); self.player.play(); self.btn_play.configure(text="⏸ PAUSE")
 
     def toggle_shuffle(self):
         self.is_shuffle = not self.is_shuffle
@@ -197,76 +309,44 @@ class MusicController(ctk.CTk):
     def toggle_repeat(self):
         m = ["none", "one", "all"]
         self.repeat_mode = m[(m.index(self.repeat_mode)+1)%3]
-        self.btn_repeat.configure(text=f"🔁 {self.repeat_mode.upper()}", fg_color="#2ecc71" if self.repeat_mode != "none" else "#333")
-
-    def next_song(self):
-        if not self.playlist: return
         
-        # --- LOGIKA ANTREAN (CEK DISINI) ---
-        if self.queue:
-            # Ambil lagu paling atas dari antrean
-            next_path = self.queue.pop(0) 
-            
-            # Update index agar sinkron dengan playlist utama
-            if next_path in self.playlist:
-                self.current_idx = self.playlist.index(next_path)
-            
-            # Update jendela antrean kalau lagi kebuka
-            if hasattr(self, 'q_win') and self.q_win.winfo_exists():
-                self.q_win.update_list()
-                
-            self.play_current()
-            return # Selesai, jangan lanjut ke shuffle/normal
-
-        # --- LOGIKA NORMAL (Kalau antrean kosong) ---
-        if self.is_shuffle:
-            self.current_idx = random.randint(0, len(self.playlist)-1)
-        else:
-            self.current_idx = (self.current_idx + 1) % len(self.playlist)
-        self.play_current()
-
-    def prev_song(self):
-        if not self.playlist: return
-        self.current_idx = (self.current_idx - 1) % len(self.playlist); self.play_current()
-
-    def toggle_play(self):
-        if self.player.is_playing(): self.player.pause(); self.btn_play.configure(text="▶ PLAY")
-        else: self.ensure_window(); self.player.play(); self.btn_play.configure(text="⏸ PAUSE")
+        self.btn_repeat.configure(
+            text=f"🔁 {self.repeat_mode.upper()}", 
+            fg_color="#2ecc71" if self.repeat_mode != "none" else "#333"
+        )
 
     def update_ui_loop(self):
-        # Cek apakah jendela masih ada sebelum lanjut
-        if not self.winfo_exists(): 
-            return
+        if not self.winfo_exists(): return
             
         if self.player.is_playing():
             pos = self.player.get_position() * 1000
             if pos >= 0: self.slider_progress.set(pos)
             
         if self.player.get_state() == vlc.State.Ended:
-            if self.repeat_mode == "one": self.play_current()
-            else: self.next_song()
+            self.player.stop() 
             
-        # Gunakan try-except untuk menangkap error saat closing
+            if self.repeat_mode == "one":
+                self.play_current()
+            else:
+                self.next_song(manual=False)
+            
         try:
             self.after(500, self.update_ui_loop)
         except:
             pass
 
-    # --- FILE & SYSTEM LOGIC ---
     def start_folder_watcher(self, path):
         if self.observer: self.observer.stop()
-        self.observer = Observer()
-        self.observer.schedule(PlaylistHandler(lambda: self.after(0, self.process_playlist, path)), path)
-        self.observer.start()
+        self.observer = Observer(); self.observer.schedule(PlaylistHandler(lambda: self.after(0, self.process_playlist, path)), path); self.observer.start()
 
     def process_playlist(self, path):
         self.all_songs = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(('.mp4', '.mp3', '.m4a'))]
+        self.current_idx = 0
         self.filter_playlist()
 
     def filter_playlist(self, *args):
         q = self.search_var.get().lower()
-        self.playlist = [f for f in self.all_songs if q in os.path.basename(f).lower()]
-        self.update_listbox()
+        self.playlist = [f for f in self.all_songs if q in os.path.basename(f).lower()]; self.update_listbox()
 
     def update_listbox(self):
         self.playlist_box.delete(0, tk.END)
@@ -288,15 +368,13 @@ class MusicController(ctk.CTk):
         p = ""
         if os.path.exists(self.SETTINGS_FILE):
             with open(self.SETTINGS_FILE, "r") as f: p = json.load(f).get("last_folder", "")
-        if not hasattr(self, 'dl_win') or not self.dl_win.winfo_exists():
-            self.dl_win = DownloadWindow(self, lambda: self.process_playlist(p))
+        if not hasattr(self, 'dl_win') or not self.dl_win.winfo_exists(): self.dl_win = DownloadWindow(self, lambda: self.process_playlist(p))
         else: self.dl_win.focus()
 
     def ensure_window(self):
         if not self.playlist: return
         if not self.cinema_window or not self.cinema_window.winfo_exists():
-            self.cinema_window = FloatingCinema(self, self.player, self.playlist[self.current_idx])
-            self.player.set_hwnd(self.cinema_window.video_frame.winfo_id())
+            self.cinema_window = FloatingCinema(self, self.player, self.playlist[self.current_idx]); self.player.set_hwnd(self.cinema_window.video_frame.winfo_id())
         else: self.cinema_window.deiconify()
 
     def create_tray_icon(self):
@@ -306,39 +384,20 @@ class MusicController(ctk.CTk):
         self.tray_icon = pystray.Icon("rhakimPlayer", img, "rhakim Music Player", menu); self.tray_icon.run()
 
     def quit_app(self):
-        # Sembunyikan window utama segera agar terasa 'instan' bagi user
         self.withdraw() 
-        
-        # 1. Matikan Folder Watcher agar tidak memicu event baru
         if self.observer:
-            try:
-                self.observer.stop()
-                self.observer.join(timeout=1)
+            try: self.observer.stop(); self.observer.join(timeout=1)
             except: pass
-
-        # 2. Hancurkan jendela tambahan secara eksplisit
-        windows = [getattr(self, 'cinema_window', None), 
-                   getattr(self, 'dl_win', None), 
-                   getattr(self, 'q_win', None)]
-        
-        for win in windows:
+        for win_attr in ['cinema_window', 'dl_win', 'q_win', 'pl_win']:
+            win = getattr(self, win_attr, None)
             if win and win.winfo_exists():
                 try: win.destroy()
                 except: pass
-
-        # 3. Matikan Tray Icon & RPC
-        if self.tray_icon:
-            self.tray_icon.stop()
+        if self.tray_icon: self.tray_icon.stop()
         if self.rpc:
             try: self.rpc.close()
             except: pass
-
-        # 4. Hentikan loop Tkinter
-        self.quit()
-        
-        # 5. Tombol Nuklir: Pastikan semua thread (VLC/Pystray) mati total
-        # Ini mencegah proses 'gentayangan' di Task Manager
-        os._exit(0)
+        self.quit(); os._exit(0)
 
     def hide_to_tray(self): self.withdraw(); gc.collect()
     def show_from_tray(self): self.after(0, self.deiconify)
@@ -352,44 +411,19 @@ class MusicController(ctk.CTk):
         if hasattr(self, 'q_win') and self.q_win.winfo_exists():
             self.q_win.focus()
         else:
-            self.q_win = QueueWindow(self, self.queue, self.remove_from_queue)
+            curr_song = self.playlist[self.current_idx] if self.playlist else ""
+            self.q_win = QueueWindow(self, self.queue, self.remove_from_queue, curr_song)
 
     def remove_from_queue(self, index):
-        if 0 <= index < len(self.queue):
-            self.queue.pop(index)
+        if 0 <= index < len(self.queue): self.queue.pop(index)
 
     def add_to_queue(self):
         sel = self.playlist_box.curselection()
         if sel:
-            path = self.playlist[sel[0]]
-            self.queue.append(path)
-            # Jika jendela antrean sedang terbuka, langsung update listnya
-            if hasattr(self, 'q_win') and self.q_win.winfo_exists():
-                self.q_win.update_list()
-    
-    def show_context_menu(self, event):
-        # Ambil index lagu yang paling dekat dengan posisi kursor
-        idx = self.playlist_box.nearest(event.y)
-        
-        # Select lagu tersebut secara otomatis
-        self.playlist_box.selection_clear(0, tk.END)
-        self.playlist_box.selection_set(idx)
-        
-        # Munculkan menu di koordinat mouse
-        self.context_menu.post(event.x_root, event.y_root)
-
-    def add_to_queue(self):
-        sel = self.playlist_box.curselection()
-        if sel:
-            path = self.playlist[sel[0]]
-            self.queue.append(path)
-            
-            # Print di terminal buat mastiin masuk
-            print(f"Added to Queue: {os.path.basename(path)}")
-            
-            # Kalau Jendela Antrean (QueueWindow) lagi dibuka, langsung update list-nya
-            if hasattr(self, 'q_win') and self.q_win.winfo_exists():
-                self.q_win.update_list()
+            path = self.playlist[sel[0]]; self.queue.append(path)
+            if hasattr(self, 'q_win') and self.q_win.winfo_exists(): 
+                curr_song = self.playlist[self.current_idx] if self.playlist else ""
+                self.q_win.update_list(curr_song)
 
 if __name__ == "__main__":
     MusicController().mainloop()
