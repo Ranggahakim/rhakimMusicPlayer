@@ -14,3 +14,6 @@ settings.json
 # OS specific files
 .DS_Store
 Thumbs.db
+
+#secrets hehe
+.env
