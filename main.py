@@ -9,10 +9,21 @@ from tkinter import filedialog
 from PIL import Image
 import pystray
 from pystray import MenuItem as item
-from pynput import keyboard
 from dotenv import load_dotenv
 from pypresence import Presence
 from ui_components import FloatingCinema
+import ctypes
+import sys
+
+def resource_path(relative_path):
+    """ Dapatkan path absolut ke resource, berfungsi untuk dev dan PyInstaller """
+    try:
+        # PyInstaller membuat folder sementara _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # Load environment variables
 load_dotenv()
@@ -26,8 +37,15 @@ class MusicController(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+        myappid = 'mycompany.myproduct.subproduct.version' # ID bebas
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
         self.title("rhakim Music Player")
         self.geometry("450x800")
+
+        icon_path = resource_path("app.ico")
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
         
         # --- LOGIKA SYSTEM TRAY & CLOSE ---
         self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
@@ -54,9 +72,6 @@ class MusicController(ctk.CTk):
 
         self.setup_ui()
         self.load_recent_folder()
-        
-        # --- START GLOBAL HOTKEYS ---
-        self.setup_hotkeys()
         
         # --- START SYSTEM TRAY ---
         threading.Thread(target=self.create_tray_icon, daemon=True).start()
@@ -109,28 +124,11 @@ class MusicController(ctk.CTk):
 
         self.update_ui_loop()
 
-    # --- LOGIKA GLOBAL HOTKEYS (pynput) ---
-    def setup_hotkeys(self):
-        def on_press(key):
-            try:
-                # Kombinasi Alt + Arrow/P
-                if any([key == keyboard.Key.media_play_pause, 
-                        (hasattr(key, 'char') and key.char == 'p')]):
-                    self.toggle_play()
-                elif key == keyboard.Key.media_next:
-                    self.next_song()
-                elif key == keyboard.Key.media_previous:
-                    self.prev_song()
-            except: pass
-
-        # Menjalankan listener di thread terpisah agar tidak mematikan GUI
-        self.listener = keyboard.Listener(on_press=on_press)
-        self.listener.start()
-
     # --- LOGIKA SYSTEM TRAY (pystray) ---
     def create_tray_icon(self):
         # Gunakan ikon aplikasi atau buat gambar sederhana jika belum ada
-        icon_path = "app.ico"
+        icon_path = resource_path("app.ico")
+        
         if os.path.exists(icon_path):
             img = Image.open(icon_path)
         else:
