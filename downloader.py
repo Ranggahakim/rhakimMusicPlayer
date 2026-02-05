@@ -50,7 +50,7 @@ class DownloadWindow(ctk.CTkToplevel):
             if self.refresh_callback: self.after(0, self.refresh_callback)
             self.after(0, lambda: messagebox.showinfo("Done", "MV Berhasil masuk list!"))
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("Err", f"Gagal: {e}"))
+            self.after(0, lambda e=e: messagebox.showerror("Err", f"Gagal: {e}"))
         finally:
             self.after(0, self.reset_ui)
             gc.collect() # Bersihkan sisa download dari RAM
