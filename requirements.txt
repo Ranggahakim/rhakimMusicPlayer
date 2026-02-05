@@ -1,0 +1,10 @@
+```text
+customtkinter
+python-vlc
+Pillow
+pystray
+python-dotenv
+pypresence
+watchdog
+yt-dlp
+syncedlyrics
